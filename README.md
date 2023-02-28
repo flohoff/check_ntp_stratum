@@ -1,4 +1,11 @@
 
+The original monitoring plugins come with a bunch of NTP check binarys but
+they fail if the Clock to be monitored refuses all further NTP based commands
+except the time syncronisation. So all these scripts fail in monitoring 
+stripped down or security enabled clocks.
+
+This script only uses plain time sync commands.
+
 Installation
 ============
 

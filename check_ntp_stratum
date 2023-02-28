@@ -1,0 +1,80 @@
+#!/usr/bin/perl -w
+
+use strict;
+use open IO => ":encoding(utf-8)";
+use open ':std';
+use experimental 'signatures';
+
+use Net::NTP qw(get_ntp_response);
+use Socket;
+use IO::Socket qw(AF_INET IPPROTO_UDP);
+use Time::HiRes qw(time);
+use Monitoring::Plugin;
+use Getopt::Long::Descriptive;
+use FindBin qw($Bin $Script);
+
+sub check_ntp($opt, $np) {
+	my $socket=IO::Socket->new(
+		Domain => AF_INET,
+		PeerHost => $opt->host,
+		PeerPort => $opt->port,
+		Proto => IPPROTO_UDP);
+	 
+	my $xmttime = time();
+	my $spkt = Net::NTP::Packet->new_client_packet($xmttime);
+
+	$socket->send($spkt->encode());
+	$socket->recv(my $data, 1024);
+
+	my $rectime = time();
+	my $cpkt = Net::NTP::Packet->decode($data, $xmttime, $rectime);
+
+	my $stratum=$cpkt->{stratum};
+	my $code = $np->check_threshold(
+		check => $stratum,
+		warning => $opt->warning,
+		critical => $opt->critical
+	);
+
+	$np->add_perfdata(
+		label => "stratum",
+		value => $stratum,
+		warning => $opt->warning,
+		critical => $opt->critical,
+		min => 1,
+		max => 16
+	);
+
+	my $offset=Net::NTP->offset($cpkt, $xmttime, $rectime);
+	$np->add_perfdata(
+		label => "offset",
+		value => $offset
+	);
+
+	$np->add_message(OK, sprintf("Stratum %d offset %f", $stratum, $offset));
+}
+
+
+my ($opt, $usage) = describe_options(
+	"$Script %o <some-arg>",
+	[ 'host|h=s',		"Host of NTP clock to query", { required => 1 } ],
+	[ 'port|p=i',		"SNMP community", { default => 123 } ],
+	[ 'timeout|t=i',	"Timeout", { default => 15 } ],
+	[ 'warning|w=i',	"Warning stratum", { default => 4 } ],
+	[ 'critical|c=i',	"Critical stratum", { default => 9 } ],
+	[],
+	[ 'help',               "print usage message and exit", { shortcircuit => 1 } ],
+);
+
+print($usage->text), exit if $opt->help;
+
+my $np = Monitoring::Plugin->new(
+	timeout => $opt->timeout
+);
+
+check_ntp($opt, $np);
+
+my ($code, $message) = $np->check_messages();
+$np->plugin_exit( $code, $message );
+
+
